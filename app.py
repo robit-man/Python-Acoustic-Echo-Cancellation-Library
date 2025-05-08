@@ -1,84 +1,59 @@
-import scipy.io.wavfile as wav
 import numpy as np
+import scipy.io.wavfile as wav
 import matplotlib.pyplot as plt
-from lms import lms_filter  # Assuming lms_filter_safe is implemented in the lms module
+from lms import lms_filter            # neu: kein _safe-Alias mehr
 
-def normalize_signal(signal):
-    """
-    Normalize the signal to the range of int16 values.
-    Args:
-    - signal: Input signal to normalize
+# ------------------------------------------------------------
+# helpers
+# ------------------------------------------------------------
+def normalize_to_int16(sig: np.ndarray) -> np.ndarray:
+    """Scale float signal to the full int16 range (±32767)."""
+    sig = np.nan_to_num(sig)                      # replace NaNs
+    peak = np.max(np.abs(sig))
+    if peak > 0:
+        sig = sig / peak
+    return np.int16(np.clip(sig * 32767, -32768, 32767))
 
-    Returns:
-    - normalized_signal: Signal normalized between -32768 and 32767 (int16 range)
-    """
-    # Remove NaN values and clip the signal to avoid overflow
-    signal = np.nan_to_num(signal)
-    max_val = np.max(np.abs(signal))
-    
-    # Normalize to int16 range if needed
-    if max_val > 0:
-        signal = signal / max_val * 32767
 
-    return np.clip(signal, -32768, 32767).astype(np.int16)
+def process_wav_file(inp: str, out: str):
+    """Run LMS AEC on a single WAV file and write the result."""
+    fs, y = wav.read(inp)                # y is int16
+    x = y.astype(np.float32) / 32768.0   # scale to ±1
 
-def process_wav_file(input_wav_path, output_wav_path):
-    """
-    Process a WAV file for Acoustic Echo Cancellation using LMS filtering.
-    
-    Args:
-    - input_wav_path: Path to the input WAV file
-    - output_wav_path: Path to save the processed WAV file
-    """
-    # Load the WAV file
-    fs, audio_data = audio_data.astype(np.float32)  # Int16 -> Float32 wav.read(input_wav_path)
-    
-    # If stereo, convert to mono by averaging the channels
-    if len(audio_data.shape) > 1:
-        audio_data = audio_data.astype(np.float32)  # Int16 -> Float32 np.mean(audio_data, axis=1)
-    
-    # Apply LMS filter for Acoustic Echo Cancellation
-    filter_coeff = np.random.randn(10)  # Initial filter coefficients
-    step_sizes = [0.001, 0.01, 0.1, 1]  # Possible step sizes
-    
-    filtered_signal, best_step_size = lms_filter_safe(audio_data, audio_data, filter_coeff, step_sizes)
-    
-    # Normalize the filtered signal
-    normalized_filtered_signal = normalize_signal(filtered_signal)
-    
-    # Save the filtered and normalized signal as a new WAV file
-    wav.write(output_wav_path, fs, normalized_filtered_signal)
-    
-    # Return the original and filtered signals for plotting
-    return audio_data, normalized_filtered_signal, fs
+    # stereo → mono
+    if x.ndim == 2:
+        x = x.mean(axis=1)
 
-def plot_signals(original_signal, filtered_signal, fs):
-    """
-    Plot the original and filtered signals for comparison.
-    
-    Args:
-    - original_signal: The original audio signal
-    - filtered_signal: The filtered audio signal
-    - fs: Sample rate of the signals
-    """
-    plt.figure(figsize=(12, 6))
-    plt.plot(original_signal, label='Original Signal')
-    plt.plot(filtered_signal, label='Filtered Signal', alpha=0.7)
-    plt.title('Original vs. Filtered Signal (Acoustic Echo Cancellation)')
-    plt.xlabel('Samples')
-    plt.ylabel('Amplitude')
-    plt.legend()
-    plt.show()
+    # LMS parameters
+    f0 = np.zeros(1024, dtype=np.float32)
+    mus = [1e-4, 5e-4, 1e-3]             # realistic μ list
 
+    e, *_ = lms_filter(
+        desired_signal=x,
+        reference_input=x,               # self-echo demo
+        filter_coeff=f0,
+        step_sizes=mus,
+        safe=True                        # clips err to ±1e4
+    )
+
+    wav.write(out, fs, normalize_to_int16(e))
+    return x, e, fs
+
+
+def plot_signals(orig, filt):
+    plt.figure(figsize=(12, 5))
+    plt.plot(orig,  label="Original")
+    plt.plot(filt,  label="AEC output", alpha=0.7)
+    plt.title("Original vs. Filtered (AEC)")
+    plt.legend(); plt.tight_layout(); plt.show()
+
+# ------------------------------------------------------------
+# main
+# ------------------------------------------------------------
 if __name__ == "__main__":
-    # File paths
-    input_wav_path = 'input_audio.wav'  # Path to the input WAV file
-    output_wav_path = 'filtered_audio.wav'  # Path to save the filtered WAV file
-    
-    # Process the WAV file
-    original_signal, filtered_signal, fs = process_wav_file(input_wav_path, output_wav_path)
-    
-    # Plot the signals for comparison
-    plot_signals(original_signal, filtered_signal, fs)
-    
-    print(f'Filtered audio saved to {output_wav_path}')
+    in_wav  = "input_audio.wav"
+    out_wav = "filtered_audio.wav"
+
+    orig, filt, sr = process_wav_file(in_wav, out_wav)
+    plot_signals(orig, filt)
+    print(f"✓ Filtered audio written to {out_wav}")
