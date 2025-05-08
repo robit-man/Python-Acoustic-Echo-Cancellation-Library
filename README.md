@@ -1,109 +1,139 @@
 # Python Acoustic Echo Cancellation Library
 
-![screenshot](https://github.com/Keyvanhardani/Python-Acoustic-Echo-Cancellation-Library/blob/main/logo.png?raw=true)
+![logo](logo.png)
 
+## Overview
+This repository implements classic **adaptive filters**—LMS, NLMS, and RLS—geared toward real-time **Acoustic Echo Cancellation (AEC)**, noise reduction, and general audio DSP.
 
-## Description
-This project implements adaptive filter algorithms for **Acoustic Echo Cancellation (AEC)** and general audio processing. The library includes adaptive filtering algorithms such as:
-- **LMS (Least Mean Squares)**
-- **NLMS (Normalized LMS)**
-- **RLS (Recursive Least Squares)**
+| Filter | Highlights |
+|--------|------------|
+| **LMS**  | Lightweight; now supports a `safe` mode that clips extreme error values to prevent numeric overflows. |
+| **NLMS** | Normalises step size per block ⇒ faster, stabler convergence. |
+| **RLS**  | Uses an inverse correlation matrix for very rapid adaptation. |
 
-These filters are crucial for applications in speech processing, **echo suppression**, and **noise reduction**. The adaptive nature of these algorithms allows them to adjust dynamically to incoming signals and reduce unwanted echoes in real-time.
-
-### **What is Acoustic Echo Cancellation?**
-Acoustic Echo Cancellation (AEC) is the process of removing the echo that occurs when a microphone picks up audio output from nearby speakers. AEC is commonly used in telecommunication systems, video conferencing, and other audio processing systems to improve clarity and prevent feedback loops.
-
-## Features
-- **LMS (Least Mean Squares):** A simple adaptive filter that adjusts coefficients based on the error between the desired and estimated signal.
-- **NLMS (Normalized LMS):** An extension of LMS with normalized step size for greater stability and performance across varying signal strengths.
-- **RLS (Recursive Least Squares):** A more sophisticated filter using an inverse correlation matrix for fast and precise adaptation.
+---
 
 ## Installation
-To use the library, clone the repository and install the necessary dependencies:
+```bash
+pip install numpy scipy matplotlib sounddevice   # sounddevice is needed for the live demo
+````
+
+> ⚠️ The package is source-only for now—just clone and import:
 
 ```bash
-pip install numpy scipy matplotlib
+git clone https://github.com/Keyvanhardani/Python-Acoustic-Echo-Cancellation-Library.git
+cd Python-Acoustic-Echo-Cancellation-Library
 ```
 
-## Usage
-The library provides a set of filters that can be easily applied to audio data for Acoustic Echo Cancellation. Below are examples of how to use the filters:
+---
 
-LMS Filter Example:
+## Quick Start
+
+### 1 · Run the built-in demo
+
 ```bash
+python lms.py     # picks the best μ and prints the total error
+```
+
+### 2 · Live AEC over mic + speaker
+
+```bash
+python mic_demo.py    # press Ctrl-C to stop
+```
+
+You’ll hear your own voice while the loud-speaker echo is strongly attenuated.
+
+---
+
+## API Examples
+
+### LMS (with `safe=True`)
+
+```python
 from lms import lms_filter
-
-desired_signal = np.random.randn(1000)  # Desired audio signal
-reference_input = np.random.randn(1000)  # Reference signal (could be the echo)
-filter_coeff = np.random.randn(10)  # Initial filter coefficients
-step_sizes = [0.001, 0.01, 0.1, 1]  # Possible step sizes
-
-f_adaptive, best_step_size = lms_filter(desired_signal, reference_input, filter_coeff, step_sizes)
-```
-NLMS Filter Example:
-```bash
-from nlms import nlms_filter
-
-desired_signal = np.random.randn(1000)
-reference_input = np.random.randn(1000)
-filter_coeff = np.random.randn(10)  # Initial filter coefficients
-
-f_adaptive, error = nlms_filter(desired_signal, reference_input, filter_coeff)
-
-```
-RLS Filter Example:
-```bash
-from rls import rls_filter
-
-desired_signal = np.random.randn(1000)
-reference_input = np.random.randn(1000)
-filter_coeff = np.random.randn(10)  # Initial filter coefficients
-reg_param = 0.1  # Regularization parameter
-
-f_adaptive, error = rls_filter(desired_signal, reference_input, filter_coeff, reg_param)
-
-```
-Example: Applying LMS Filter to a WAV File for AEC
-```bash
-import scipy.io.wavfile as wav
-from lms_filter import lms_filter_safe
 import numpy as np
 
-# Load audio file
-fs, audio_data = wav.read('path_to_audio_file.wav')
+d = np.random.randn(10_000).astype(np.float32)  # desired signal
+u = np.random.randn(10_000).astype(np.float32)  # reference (echo path)
+f0 = np.zeros(1024, dtype=np.float32)           # initial coeffs
+mus = [1e-4, 5e-4, 1e-3]
 
-# If stereo, convert to mono
-if len(audio_data.shape) > 1:
-    audio_data = np.mean(audio_data, axis=1)
-
-# Apply LMS filter for Acoustic Echo Cancellation
-filter_coeff = np.random.randn(10)
-filtered_signal, best_step_size = lms_filter_safe(audio_data, audio_data, filter_coeff, [0.001, 0.01, 0.1])
-
-# Normalize and save the filtered signal
-wav.write('filtered_audio_file.wav', fs, np.int16(filtered_signal))
-
+e, f_adapt, best_mu = lms_filter(
+        desired_signal=d,
+        reference_input=u,
+        filter_coeff=f0,
+        step_sizes=mus,
+        safe=True        # clips |e| ≤ 1e4 → no RuntimeWarnings
+)
 ```
-## Signal Visualization
-Here’s how to visualize the original and filtered signal using matplotlib:
 
-```bash
+### NLMS
+
+```python
+from nlms import nlms_filter
+e, f_adapt = nlms_filter(d, u, f0, mu=0.5)
+```
+
+### RLS
+
+```python
+from rls import rls_filter
+e, f_adapt = rls_filter(d, u, f0, reg_param=0.1, lambda_=0.98)
+```
+
+---
+
+## Batch AEC: WAV → filtered WAV
+
+```python
+import scipy.io.wavfile as wav
+from lms import lms_filter
+import numpy as np
+
+fs, y = wav.read("input.wav")        # y is int16
+x = y.astype(np.float32) / 32768.0   # scale to ±1
+
+e, *_ = lms_filter(x, x, np.zeros(1024), [5e-4], safe=True)
+
+wav.write("output.wav", fs, np.int16(e / np.max(np.abs(e)) * 32767))
+```
+
+---
+
+## Visualising the Result
+
+```python
 import matplotlib.pyplot as plt
-
-# Plot the original and filtered signal
-plt.figure(figsize=(10, 6))
-plt.plot(audio_data, label='Original Signal')
-plt.plot(filtered_signal, label='Filtered Signal', alpha=0.7)
-plt.title('Original vs. Filtered Signal (AEC)')
-plt.xlabel('Samples')
-plt.ylabel('Amplitude')
-plt.legend()
-plt.show()
-
-
-
-```bash
-# Live‑AEC Demo
-pip install sounddevice
-python mic_demo.py
+plt.plot(x,   label="Original")
+plt.plot(e,   label="AEC output", alpha=0.7)
+plt.legend(); plt.show()
 ```
+
+---
+
+## Live Demo Options
+
+| Flag    | Description                           | Default   |
+| ------- | ------------------------------------- | --------- |
+| `BLOCK` | FFT/block length (also filter length) | 1024      |
+| `FS`    | Sample rate                           | 48 000 Hz |
+| `MU`    | Step size                             | 5 × 10⁻⁴  |
+
+Adjust them directly at the top of **`mic_demo.py`**.
+
+---
+
+## Contributing
+
+1. Fork & create a feature branch.
+2. Run `python lms.py` and `python mic_demo.py`—there must be **zero warnings**.
+3. Submit a PR with a clear description.
+
+---
+
+## License
+
+MIT
+
+```
+
