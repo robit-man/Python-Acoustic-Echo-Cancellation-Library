@@ -1,5 +1,14 @@
 # Python Acoustic Echo Cancellation Library
 
+
+### Update from robit
+1. modified lms.py to accomodate live passthrough audio
+2. modified mic_demo.py to automatically generate and install deps in a venv
+3. one off run and test demo ```python3 mlc_demo.py```
+4. simple as
+
+
+
 ![logo](logo.png)
 
 ## Overview
